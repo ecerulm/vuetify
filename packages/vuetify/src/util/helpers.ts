@@ -439,4 +439,7 @@ export function maybeTransition <T extends VNode | VNode[] | undefined> (
   )
 }
 
-export const randomHexColor = () => `#${Math.floor(Math.random() * 16777215).toString(16)}`
+export const randomHexColor = () => {
+  const n = (Math.random() * 0xfffff * 1000000).toString(16)
+  return '#' + n.slice(0, 6)
+}
