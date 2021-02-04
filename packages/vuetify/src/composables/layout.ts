@@ -1,20 +1,31 @@
-import { defineComponent, h, inject, provide, computed, ref, onBeforeUnmount } from 'vue'
-import type { InjectionKey, Ref, Prop } from 'vue'
+// Utilities
+import { inject, provide, computed, ref, onBeforeUnmount } from 'vue'
+import propsFactory from '@/util/propsFactory'
+
+// Types
+import type { InjectionKey, Ref } from 'vue'
 
 type Position = 'top' | 'left' | 'right' | 'bottom'
 
 interface LayoutProvide {
-  register: (id: string, position: Ref<Position>, amount: Ref<number>) => Ref<Record<string, unknown>>
+  register: (id: string, position: Ref<Position>, amount: Ref<number | string>) => Ref<Record<string, unknown>>
   unregister: (id: string) => void
   padding: Ref<string>
 }
 
-export const VuetifyLayoutKey: InjectionKey<LayoutProvide> = Symbol.for('vuetify-layout')
+export const VuetifyLayoutKey: InjectionKey<LayoutProvide> = Symbol.for('vuetify:layout')
 
-export function useLayout (id: string, amount: Ref<number>, position: Ref<Position>) {
+export const makeLayoutItemProps = propsFactory({
+  name: {
+    type: String,
+    required: true,
+  },
+})
+
+export function useLayoutItem (id: string, position: Ref<Position>, amount: Ref<number | string>) {
   const layout = inject(VuetifyLayoutKey)
 
-  if (!layout) throw new Error('No layout!')
+  if (!layout) throw new Error('Could not find injected Vuetify layout')
 
   const styles = layout.register(id, position, amount)
 
@@ -27,7 +38,7 @@ const generateLayers = (
   layout: string[],
   registered: string[],
   positions: Map<string, Ref<Position>>,
-  amounts: Map<string, Ref<number>>
+  amounts: Map<string, Ref<number | string>>
 ) => {
   let previousLayer = { top: 0, left: 0, right: 0, bottom: 0 }
   const layers = [{ id: '', layer: { ...previousLayer } }]
@@ -39,7 +50,7 @@ const generateLayers = (
 
     const layer = {
       ...previousLayer,
-      [position.value]: previousLayer[position.value] + amount.value,
+      [position.value]: parseInt(previousLayer[position.value], 10) + parseInt(amount.value, 10),
     }
 
     layers.push({
@@ -52,14 +63,17 @@ const generateLayers = (
 
   return layers
 }
-export function createLayout (layout: Ref<string[]>, overlaps: Ref<string[]>) {
+
+// TODO: Remove undefined from layout and overlaps when vue typing for required: true prop is fixed
+export function createLayout (props: { layout?: string[], overlaps?: string[] }) {
   const registered = ref<string[]>([])
   const positions = new Map<string, Ref<Position>>()
-  const amounts = new Map<string, Ref<number>>()
+  const amounts = new Map<string, Ref<number | string>>()
 
   const computedOverlaps = computed(() => {
     const map = new Map<string, { position: Position, amount: number }>()
-    for (const overlap of overlaps.value.filter(item => item.includes(':'))) {
+    const overlaps = props.overlaps ?? []
+    for (const overlap of overlaps.filter(item => item.includes(':'))) {
       const [top, bottom] = overlap.split(':')
       if (!registered.value.includes(top) || !registered.value.includes(bottom)) continue
 
@@ -70,15 +84,15 @@ export function createLayout (layout: Ref<string[]>, overlaps: Ref<string[]>) {
 
       if (!topPosition || !bottomPosition || !topAmount || !bottomAmount) continue
 
-      map.set(bottom, { position: topPosition.value, amount: topAmount.value })
-      map.set(top, { position: bottomPosition.value, amount: -bottomAmount.value })
+      map.set(bottom, { position: topPosition.value, amount: parseInt(topAmount.value, 10) })
+      map.set(top, { position: bottomPosition.value, amount: -parseInt(bottomAmount.value, 10) })
     }
 
     return map
   })
 
   const layers = computed(() => {
-    return generateLayers(layout.value, registered.value, positions, amounts)
+    return generateLayers(props.layout ?? [], registered.value, positions, amounts)
   })
 
   const padding = computed(() => {
@@ -87,7 +101,7 @@ export function createLayout (layout: Ref<string[]>, overlaps: Ref<string[]>) {
   })
 
   provide(VuetifyLayoutKey, {
-    register: (id: string, position: Ref<Position>, amount: Ref<number>) => {
+    register: (id: string, position: Ref<Position>, amount: Ref<number | string>) => {
       positions.set(id, position)
       amounts.set(id, amount)
       registered.value.push(id)
@@ -95,7 +109,7 @@ export function createLayout (layout: Ref<string[]>, overlaps: Ref<string[]>) {
       return computed(() => {
         const index = layers.value.findIndex(l => l.id === id)
 
-        if (index < 0) throw new Error(`Item ${id} is missing from layout prop`)
+        if (index < 0) throw new Error(`Layout item "${id}" is missing from layout prop`)
 
         const item = layers.value[index - 1]
 
@@ -127,37 +141,5 @@ export function createLayout (layout: Ref<string[]>, overlaps: Ref<string[]>) {
       registered.value = registered.value.filter(v => v !== id)
     },
     padding,
-  })
-}
-
-export function VLayout () {
-  defineComponent({
-    name: 'VLayout',
-    props: {
-      layout: {
-        type: Array,
-        default: () => ([]),
-      } as Prop<string[]>,
-      overlaps: {
-        type: Array,
-      } as Prop<string[]>,
-      fullHeight: Boolean,
-    },
-    setup (props, { slots }) {
-      const layout = computed(() => props.layout ?? [])
-      const overlaps = computed(() => props.overlaps ?? [])
-      createLayout(layout, overlaps)
-
-      return () => h('div', {
-        style: {
-          position: 'relative',
-          display: 'flex',
-          flex: '1 1 auto',
-          height: props.fullHeight ? '100vh' : undefined,
-          overflow: 'hidden',
-          zIndex: 0,
-        },
-      }, slots.default?.())
-    },
   })
 }
